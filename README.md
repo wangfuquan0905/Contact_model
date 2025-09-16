@@ -11,7 +11,7 @@ Usage
 
 Run the main script:
 
-    python main.py --model penalty --num 2 --dt 0.008 --substeps 1 --e 0.9
+    python main.py
 
 Command-line Arguments:
     --model     : collision model to use (penalty, constraint, energy)
