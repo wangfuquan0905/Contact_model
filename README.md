@@ -38,26 +38,14 @@ Controls (Keyboard)
 Notes
 -------------------------------------------------------
 
-- Only the penalty model is fully implemented in this version.
-- Constraint and energy models are placeholders and will currently just
-  print a notice if selected.
-- The codebase is modular:
-  * World handles bodies, forces, and integrators.
-  * Model handles collision resolution strategies.
-  * Integrator controls time-stepping.
+- Only the penalty constraint model is fully implemented in this version.
+- energy models will be added in today.
 
 -------------------------------------------------------
-Example
--------------------------------------------------------
 
-Simulate 2 discs with penalty collisions, restitution = 0.9:
-
-    python main.py --model penalty --num 2 --dt 0.008 --substeps 1 --e 0.9
-
--------------------------------------------------------
 Roadmap
 -------------------------------------------------------
 
 - [x] Penalty-based collision model
-- [ ] Constraint-based collision model (impulse/LCP)
+- [x] Constraint-based collision model (impulse/LCP)
 - [ ] Energy-based collision model (potential methods)
