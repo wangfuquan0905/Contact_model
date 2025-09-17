@@ -38,8 +38,7 @@ Controls (Keyboard)
 Notes
 -------------------------------------------------------
 
-- Only the penalty constraint model is fully implemented in this version.
-- energy models will be added in today.
+- all 3 model is fully implemented in this version.
 
 -------------------------------------------------------
 
@@ -48,4 +47,4 @@ Roadmap
 
 - [x] Penalty-based collision model
 - [x] Constraint-based collision model (impulse/LCP)
-- [ ] Energy-based collision model (potential methods)
+- [x] Energy-based collision model (potential methods)
