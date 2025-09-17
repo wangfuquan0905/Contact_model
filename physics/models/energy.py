@@ -9,10 +9,54 @@ from .base import CollisionModel
 
 class EnergyCollision(CollisionModel):
     name = "energy"
-    def __init__(self,mu = 0.5, eps = 1e-4, d0 = 1e-4):
+    def __init__(self,mu = 0.5, eps = 1e-4, d0 = 1e-4, e = 0.5):
         self.mu = float(mu)
         self.eps = float(eps)
         self.d0 = float(d0)
+        self.e = float(e)
+    
+    def _dpsi_from_reladis(self, reladis: float) -> float:# gradient of contact energy
+        #p = max(reladis, 0.0)
+        #Psi = (self.mu/2)* ((self.d0 - reladis)**2)/(p + self.eps)
+        #-----gradient of Psi------
+        if reladis > 0: 
+            dpsi = (self.mu/2)*((reladis - self.d0)*(reladis + self.d0 + 2*self.eps))/((reladis + self.eps)**2)
+        else:
+            dpsi = self.mu*(reladis - self.d0)/(self.eps)  
+              
+        return dpsi
+    
+    def _knumerical(self,reladis: float, get_force_scalar) -> float:# numerical stiffness
+        delta = max(1e-6, 1e-3 * self.d0)
+        f_plus  = get_force_scalar(reladis + delta)
+        f_minus = get_force_scalar(reladis - delta)
+        k = (f_plus - f_minus) / (2.0 * delta)
+        return max(k, 0.0)  # 数值安全
+    
+    def _zeta_from_e(self, e: float) -> float: # damping ratio from restitution
+        e = max(1e-6, min(0.999999, float(e)))
+        L = math.log(1.0 / e)
+        return L / math.sqrt(math.pi**2 + L*L)
+                                        
+    def _cn(self, meff: float, e: float, reladis: float) -> float:# critical damping coefficient
+        zeta = self._zeta_from_e(e)
+        return 2.0 * zeta * math.sqrt(meff * self._knumerical(reladis, self._dpsi_from_reladis))
+    
+    def _proximity_weight(self, reladis: float):# [0, d0] -> [1, 0]
+        t = (self.d0 - reladis) / self.d0
+        if t <= 0:
+            return 0.0
+        elif t >= 1:
+            return 1.0
+        else:
+            return t*t*(3 - 2*t)  # smoothstep
+        
+    def _meff_pair(self, a, b) -> float:# effective mass of a pair
+        if a.inv_m + b.inv_m > 0.0:
+            return 1.0 / (a.inv_m + b.inv_m)
+        else:
+            return math.inf
+        
         
     def apply(self, world, h: float):
         for i, j, a, b in world.each_pairs():
@@ -20,32 +64,46 @@ class EnergyCollision(CollisionModel):
             dist2 = float(dx @ dx)
             rad = a.r + b.r
             actdis = rad + self.d0
-            if dist2 > actdis*actdis:
+            #collision detection
+            if dist2 > actdis*actdis: 
                 continue
             else:
                 dist = math.sqrt(dist2) if dist2 > 1e-12 else 0.0
                 n = dx / dist if dist > 1e-8 else np.array([1.0, 0.0])
-                penetration = dist - rad
-                #p = max(penetration, 0.0)
-                #Psi = (self.mu/2)* ((self.d0 - penetration)**2)/(p + self.eps)
-                if penetration > 0:
-                    dpsi = (self.mu/2)*((penetration - self.d0)*(penetration + self.d0 + 2*self.eps))/((penetration + self.eps)**2)
-                else:
-                    dpsi = self.mu*(penetration - self.d0)/(self.eps)
-                F = dpsi*n*(-1)
+                reladis = dist - rad
+                dpsi = self._dpsi_from_reladis(reladis)# gradient of contact energy
+    
+                F = -dpsi*n
                 a.force -= F
                 b.force += F
+                
+                if reladis < self.d0: # in contact(dis < d0)
+                    # relative normal velocity
+                    vn = float((b.v - a.v) @ n)
+                    meff = self._meff_pair(a, b)
+                    cn = self._cn(meff, self.e, reladis)
+                    fdamp = cn * vn * self._proximity_weight(reladis)
+                    Fd = fdamp * n
+                    a.force -= Fd
+                    b.force += Fd
         
         for b in world.bodies:
             for n, depth in world.wall_penetration(b):
-                penetration = -float(depth)
-                if penetration - self.d0 <= 0:
-                    #p = max(penetration, 0.0)
-                    #Psi = (self.mu/2)* ((self.d0 - penetration)**2)/(p + self.eps)
-                    if penetration > 0:
-                        dpsi = (self.mu/2)*((penetration - self.d0)*(penetration + self.d0 + 2*self.eps))/((penetration + self.eps)**2)
+                reladis = -float(depth)
+                if reladis - self.d0 <= 0:
+                    #p = max(reladis, 0.0)
+                    #Psi = (self.mu/2)* ((self.d0 - reladis)**2)/(p + self.eps)
+                    if reladis > 0:
+                        dpsi = (self.mu/2)*((reladis - self.d0)*(reladis + self.d0 + 2*self.eps))/((reladis + self.eps)**2)
                     else:
-                        dpsi = self.mu*(penetration - self.d0)/(self.eps)
-                    F = dpsi*n*(-1)
+                        dpsi = self.mu*(reladis - self.d0)/(self.eps)
+                    F = -dpsi*n
                     b.force += F
+                    
+                    # relative normal velocity
+                    vn = float(b.v @ n)
+                    meff = b.m 
+                    cn = self._cn(meff, self.e, reladis)
+                    fdamp = cn * vn * self._proximity_weight(reladis)
+                    b.force += -fdamp * n
         return
