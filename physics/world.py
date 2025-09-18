@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 from .bodies import Disc
 
 class World:
-    def __init__(self, size=(8.0, 5.0), dt=1/120, substeps:int=1, gravity:bool=False):
+    def __init__(self, size=(8.0, 5.0), dt=1/120, substeps:int=4, gravity:bool=False):
         self.W, self.H = size
         self.dt = float(dt)
         self.substeps = max(1, int(substeps))

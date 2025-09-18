@@ -9,13 +9,13 @@ from .base import CollisionModel
 
 class EnergyCollision(CollisionModel):
     name = "energy"
-    def __init__(self,mu = 0.5, eps = 1e-4, d0 = 1e-4, e = 0.5):
+    def __init__(self,mu = 0.5, eps = 1e-4, d0 = 1e-4, e = 0.3):
         self.mu = float(mu)
         self.eps = float(eps)
         self.d0 = float(d0)
         self.e = float(e)
     
-    def _dpsi_from_reladis(self, reladis: float) -> float:# gradient of contact energy
+    def _fn_from_reladis(self, reladis: float) -> float:# gradient of contact energy
         #p = max(reladis, 0.0)
         #Psi = (self.mu/2)* ((self.d0 - reladis)**2)/(p + self.eps)
         #-----gradient of Psi------
@@ -24,13 +24,13 @@ class EnergyCollision(CollisionModel):
         else:
             dpsi = self.mu*(reladis - self.d0)/(self.eps)  
               
-        return dpsi
+        return max(0, -dpsi)
     
     def _knumerical(self,reladis: float, get_force_scalar) -> float:# numerical stiffness
         delta = max(1e-6, 1e-3 * self.d0)
         f_plus  = get_force_scalar(reladis + delta)
         f_minus = get_force_scalar(reladis - delta)
-        k = (f_plus - f_minus) / (2.0 * delta)
+        k = (f_minus - f_plus) / (2.0 * delta)
         return max(k, 0.0)  # 数值安全
     
     def _zeta_from_e(self, e: float) -> float: # damping ratio from restitution
@@ -40,7 +40,9 @@ class EnergyCollision(CollisionModel):
                                         
     def _cn(self, meff: float, e: float, reladis: float) -> float:# critical damping coefficient
         zeta = self._zeta_from_e(e)
-        return 2.0 * zeta * math.sqrt(meff * self._knumerical(reladis, self._dpsi_from_reladis))
+        knum = self._knumerical(reladis, self._fn_from_reladis)
+        #rint(f"meff: {meff}, knum: {knum}, zeta: {zeta}")
+        return 2.0 * zeta * math.sqrt(meff * knum)
     
     def _proximity_weight(self, reladis: float):# [0, d0] -> [1, 0]
         t = (self.d0 - reladis) / self.d0
@@ -71,39 +73,36 @@ class EnergyCollision(CollisionModel):
                 dist = math.sqrt(dist2) if dist2 > 1e-12 else 0.0
                 n = dx / dist if dist > 1e-8 else np.array([1.0, 0.0])
                 reladis = dist - rad
-                dpsi = self._dpsi_from_reladis(reladis)# gradient of contact energy
-    
-                F = -dpsi*n
+                fn = self._fn_from_reladis(reladis)# gradient of contact energy
+                F = fn*n
                 a.force -= F
                 b.force += F
                 
                 if reladis < self.d0: # in contact(dis < d0)
                     # relative normal velocity
                     vn = float((b.v - a.v) @ n)
-                    meff = self._meff_pair(a, b)
-                    cn = self._cn(meff, self.e, reladis)
-                    fdamp = cn * vn * self._proximity_weight(reladis)
-                    Fd = fdamp * n
-                    a.force -= Fd
-                    b.force += Fd
+                    if vn < 0.0: # only if approaching
+                        meff = self._meff_pair(a, b)
+                        cn = self._cn(meff, self.e, reladis)
+                        w = self._proximity_weight(reladis)
+                        Fdamp = (-cn * vn * w)*n
+                        a.force -= Fdamp
+                        b.force += Fdamp
         
         for b in world.bodies:
             for n, depth in world.wall_penetration(b):
                 reladis = -float(depth)
                 if reladis - self.d0 <= 0:
-                    #p = max(reladis, 0.0)
-                    #Psi = (self.mu/2)* ((self.d0 - reladis)**2)/(p + self.eps)
-                    if reladis > 0:
-                        dpsi = (self.mu/2)*((reladis - self.d0)*(reladis + self.d0 + 2*self.eps))/((reladis + self.eps)**2)
-                    else:
-                        dpsi = self.mu*(reladis - self.d0)/(self.eps)
-                    F = -dpsi*n
+                    fn = self._fn_from_reladis(reladis)
+                    F = fn*n
                     b.force += F
-                    
+
                     # relative normal velocity
                     vn = float(b.v @ n)
-                    meff = b.m 
-                    cn = self._cn(meff, self.e, reladis)
-                    fdamp = cn * vn * self._proximity_weight(reladis)
-                    b.force += -fdamp * n
+                    if vn < 0.0: # only if approaching
+                        meff = b.m 
+                        cn = self._cn(meff, self.e, reladis)
+                        w = self._proximity_weight(reladis)
+                        Fdamp = (-cn * vn * w)*n
+                        b.force += Fdamp 
         return
